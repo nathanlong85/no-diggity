@@ -1,0 +1,89 @@
+[project]
+dependencies = [
+    "inference>=0.62.2",
+]
+description = "Detect naughty dogs stealing food"
+maintainers = [
+    { name = "Nate Long", email = "nathanlong85@gmail.com" }
+]
+name = "no-diggity"
+readme = "README.md"
+requires-python = ">=3.13"
+version = "0.1.0"
+
+[dependency-groups]
+dev = [
+    "ipdb>=0.13.13",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.2.1",
+    "pytest-icdiff>=0.9",
+    "pytest-mock>=3.12.0",
+    "pytest-randomly>=3.16.0",
+    "pytest-sugar>=1.1.1",
+    "ruff>=0.12.12",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == \"__main__\":",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--cov=no-diggity",
+    "--cov-report=html:coverage",
+    "--disable-warnings",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+python_classes = ["Test*"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+fix = true
+# Ideally 80 characters, but setting a bit higher to allow for lines that are
+# less readable when broken into multiple lines.
+line-length = 88
+
+[tool.ruff.format]
+docstring-code-format = true
+quote-style = "single"
+
+[tool.ruff.lint]
+select = [
+    "B",   # flake8-bugbear
+    "E",   # pycodestyle
+    "F",   # Pyflakes
+    "I",   # isort
+    "SIM", # flake8-simplify
+    "UP",  # pyupgrade
+]
+
+[tool.ruff.lint.per-file-ignores]
+"*/tests/**/*.py" = [
+    "S101",    # Use of assert (expected in tests)
+    "PLR2004", # Magic values (test data is often literal)
+    "ARG002",  # Unused method arguments (test fixtures)
+    "SLF001",  # Private member access (accessing external library internals in tests)
+]
+"tests/**/*.py" = [
+    "S101",    # Use of assert (expected in tests)
+    "PLR2004", # Magic values (test data is often literal)
+    "ARG002",  # Unused method arguments (test fixtures)
+    "SLF001",  # Private member access (accessing external library internals in tests)
+]
