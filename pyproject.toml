@@ -2,6 +2,7 @@
 dependencies = [
     "flask>=3.1.2",
     "numpy>=2.3.5",
+    "onnxruntime>=1.23.2",
     "opencv-python>=4.11.0.86",
     "pynput>=1.8.1",
     "ultralytics>=8.3.235",
@@ -26,6 +27,16 @@ dev = [
     "pytest-randomly>=3.16.0",
     "pytest-sugar>=1.1.1",
     "ruff>=0.12.12",
+]
+# Add this for Mac development with model export capability
+export = [
+    "torch>=2.0.0",
+]
+
+[tool.uv]
+# Only install torch on macOS for model export
+override-dependencies = [
+    "torch>=2.0.0; sys_platform == 'darwin'",
 ]
 
 [tool.coverage.report]

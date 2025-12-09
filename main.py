@@ -1,6 +1,7 @@
 import threading
 
 import cv2
+import logging
 import numpy as np
 from flask import Flask, Response, render_template_string
 from ultralytics import YOLO
@@ -29,6 +30,9 @@ model = None
 cap = None
 latest_frame = None
 frame_lock = threading.Lock()
+
+# Loggers
+logging.getLogger('ultralytics').setLevel(logging.ERROR)
 
 
 def check_polygon_zones(box):
@@ -347,7 +351,7 @@ def main():
     global model, cap
 
     print('Loading YOLO model...')
-    model = YOLO('yolo11s.pt')
+    model = YOLO('yolo11n.onnx')
 
     print('\n=== CONFIGURED ZONES (POLYGONS) ===')
     for _, zone in ZONES.items():
@@ -377,7 +381,7 @@ def main():
     print(f'   (or http://localhost:{WEB_SERVER_PORT} if running locally)\n')
 
     # Start Flask server
-    app.run(host='0.0.0.0', port=WEB_SERVER_PORT, debug=False, threaded=True)
+    app.run(host='::', port=WEB_SERVER_PORT, debug=False, threaded=True)
 
 
 if __name__ == '__main__':

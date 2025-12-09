@@ -6,11 +6,19 @@ import cv2
 # Points should go clockwise or counter-clockwise around the zone
 ZONES = {
     'kitchen_counter': {
-        'polygon': [(200, 50), (650, 80), (600, 350), (180, 320)],
+        'polygon': [
+            (341, 398), 
+            (370, 390),
+            (395, 383),
+            (420, 372),
+            (439, 359), 
+            (352, 339),
+            (244, 373)
+        ],
         'action': 'sound_alert',
         'color': (0, 255, 255),  # Yellow
         'name': 'Kitchen Counter',
-        'enabled': False,
+        'enabled': True,
     },
     'dining_table': {
         'polygon': [(700, 100), (1100, 150), (1050, 400), (680, 380)],
