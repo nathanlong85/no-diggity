@@ -107,12 +107,11 @@ def analyze_dog_position(box, frame_height):
     triggered_zones = check_polygon_zones([x1, y1, x2, y2])
 
     # Check multiple indicators
-    is_high_enough = dog_top < CONFIG['counter_height_threshold']
     is_large_enough = relative_size > CONFIG['min_elevated_size_ratio']
     in_any_zone = len(triggered_zones) > 0
 
     return {
-        'elevated': is_high_enough and is_large_enough and in_any_zone,
+        'elevated': is_large_enough and in_any_zone,
         'zones': triggered_zones,
         'top_y': dog_top,
         'size_ratio': relative_size,
@@ -194,7 +193,7 @@ def trigger_alert(zones):
 
 def process_frames():
     """Continuously process frames from webcam"""
-    global latest_frame, cap, model
+    global latest_frame, cap, net
 
     while True:
         ret, frame = cap.read()
@@ -202,29 +201,38 @@ def process_frames():
             print('Error: Could not read frame')
             break
 
-        frame_height = frame.shape[0]
+        frame_height, frame_width = frame.shape[:2]
 
         # Draw zones on frame
         frame = draw_polygon_zones(frame)
 
-        # Run detection
-        results = model(frame, verbose=False, conf=CONFIG['confidence_threshold'])
+        # Prepare frame for MobileNet-SSD
+        blob = cv2.dnn.blobFromImage(
+            frame, 0.007843, (300, 300), (127.5, 127.5, 127.5), False
+        )
+        net.setInput(blob)
+        detections = net.forward()
 
         elevated_detected = False
         all_triggered_zones = set()
 
-        for result in results:
-            boxes = result.boxes
-            for box in boxes:
-                class_name = result.names[int(box.cls[0])]
-                confidence = float(box.conf[0])
+        # Loop through detections
+        for i in range(detections.shape[2]):
+            confidence = detections[0, 0, i, 2]
 
-                if class_name == 'dog':
-                    xyxy = box.xyxy[0].cpu().numpy()
-                    x1, y1, x2, y2 = map(int, xyxy)
+            if confidence > CONFIG['confidence_threshold']:
+                class_id = int(detections[0, 0, i, 1])
+
+                # Check if it's a dog (class_id 12)
+                if class_id == CONFIG['dog_class_id']:
+                    # Get bounding box coordinates (normalized 0-1)
+                    box = detections[0, 0, i, 3:7] * np.array(
+                        [frame_width, frame_height, frame_width, frame_height]
+                    )
+                    x1, y1, x2, y2 = box.astype(int)
 
                     # Analyze position
-                    analysis = analyze_dog_position(xyxy, frame_height)
+                    analysis = analyze_dog_position([x1, y1, x2, y2], frame_height)
 
                     # Choose color based on status
                     if analysis['elevated']:
@@ -377,10 +385,14 @@ def video_feed():
 
 
 def main():
-    global model, cap
+    global net, cap
 
-    print('Loading YOLO model...')
-    model = YOLO('yolo11n.onnx')
+    # Download model files if needed
+    download_model_files()
+
+    print('Loading MobileNet-SSD model...')
+    net = cv2.dnn.readNetFromCaffe(CONFIG['prototxt_path'], CONFIG['model_path'])
+    print('✓ Model loaded successfully')
 
     print('\n=== CONFIGURED ZONES (POLYGONS) ===')
     for _, zone in CONFIG['zones'].items():
