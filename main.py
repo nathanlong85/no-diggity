@@ -44,6 +44,11 @@ cap = None
 latest_frame = None
 frame_lock = threading.Lock()
 frame_count = 0
+fps_start_time = None
+fps_frame_count = 0
+current_fps = 0
+detection_count = 0
+detection_fps = 0
 
 
 def download_model_files():
@@ -194,6 +199,12 @@ def trigger_alert(zones):
 def process_frames():
     """Continuously process frames from webcam"""
     global latest_frame, cap, net, frame_count
+    global fps_start_time, fps_frame_count, current_fps, detection_count, detection_fps
+
+    import time
+
+    fps_start_time = time.time()
+    detection_start_time = time.time()
 
     while True:
         ret, frame = cap.read()
@@ -202,7 +213,22 @@ def process_frames():
             break
 
         frame_count += 1
+        fps_frame_count += 1
         frame_height, frame_width = frame.shape[:2]
+
+        # Calculate FPS every second
+        elapsed_time = time.time() - fps_start_time
+        if elapsed_time >= 1.0:
+            current_fps = fps_frame_count / elapsed_time
+            fps_frame_count = 0
+            fps_start_time = time.time()
+
+        # Calculate detection FPS every second
+        detection_elapsed = time.time() - detection_start_time
+        if detection_elapsed >= 1.0:
+            detection_fps = detection_count / detection_elapsed
+            detection_count = 0
+            detection_start_time = time.time()
 
         # Draw zones on frame
         frame = draw_polygon_zones(frame)
@@ -212,6 +238,8 @@ def process_frames():
             with frame_lock:
                 latest_frame = frame.copy()
             continue
+
+        detection_count += 1
 
         # Prepare frame for MobileNet-SSD
         blob = cv2.dnn.blobFromImage(
@@ -338,6 +366,35 @@ def process_frames():
                 (255, 255, 255),
                 2,
             )
+
+        # Draw FPS counter in top-right corner
+        fps_text = f'Camera: {current_fps:.1f} FPS'
+        detection_text = f'Detection: {detection_fps:.1f} FPS'
+
+        # FPS background
+        cv2.rectangle(
+            frame, (frame.shape[1] - 250, 55), (frame.shape[1], 115), (0, 0, 0), -1
+        )
+
+        # FPS text
+        cv2.putText(
+            frame,
+            fps_text,
+            (frame.shape[1] - 240, 80),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 0),
+            2,
+        )
+        cv2.putText(
+            frame,
+            detection_text,
+            (frame.shape[1] - 240, 105),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 0),
+            2,
+        )
 
         # Update latest frame
         with frame_lock:
