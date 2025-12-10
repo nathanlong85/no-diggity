@@ -1,38 +1,65 @@
+import os
 import threading
+import urllib.request
 
 import cv2
-import logging
 import numpy as np
 from flask import Flask, Response, render_template_string
-from ultralytics import YOLO
 
 from calibration_template import HTML_TEMPLATE
-from config import ZONES, init_camera
+from config import CONFIG, init_camera
 
-# Height threshold - dog's TOP position must be above this line
-COUNTER_HEIGHT_THRESHOLD = 300
-
-# Size threshold - dog bounding box height relative to frame
-MIN_ELEVATED_SIZE_RATIO = 0.3  # Dog takes up at least 30% of frame height
-
-# Confidence threshold for detections
-CONFIDENCE_THRESHOLD = 0.5
-
-# Web server settings
-WEB_SERVER_PORT = 5000
 # ======================================================
+
+CLASSES = [
+    'background',
+    'aeroplane',
+    'bicycle',
+    'bird',
+    'boat',
+    'bottle',
+    'bus',
+    'car',
+    'cat',
+    'chair',
+    'cow',
+    'diningtable',
+    'dog',
+    'horse',
+    'motorbike',
+    'person',
+    'pottedplant',
+    'sheep',
+    'sofa',
+    'train',
+    'tvmonitor',
+]
 
 # Flask app
 app = Flask(__name__)
 
 # Global variables for video processing
-model = None
+net = None
 cap = None
 latest_frame = None
 frame_lock = threading.Lock()
+frame_count = 0
 
-# Loggers
-logging.getLogger('ultralytics').setLevel(logging.ERROR)
+
+def download_model_files():
+    """Download MobileNet-SSD model files if they don't exist"""
+    prototxt_url = 'https://raw.githubusercontent.com/chuanqi305/MobileNet-SSD/master/deploy.prototxt'
+    model_url = 'https://github.com/chuanqi305/MobileNet-SSD/raw/master/mobilenet_iter_73000.caffemodel'
+
+    if not os.path.exists(CONFIG['prototxt_path']):
+        print(f'Downloading {CONFIG["prototxt_path"]}...')
+        urllib.request.urlretrieve(prototxt_url, CONFIG['prototxt_path'])
+        print('✓ Downloaded prototxt')
+
+    if not os.path.exists(CONFIG['model_path']):
+        print(f'Downloading {CONFIG["model_path"]} (~23MB, this may take a minute)...')
+        urllib.request.urlretrieve(model_url, CONFIG['model_path'])
+        print('✓ Downloaded model')
 
 
 def check_polygon_zones(box):
@@ -50,7 +77,7 @@ def check_polygon_zones(box):
 
     triggered_zones = []
 
-    for zone_id, zone in ZONES.items():
+    for zone_id, zone in CONFIG['zones'].items():
         if not zone['enabled']:
             continue
 
@@ -80,8 +107,8 @@ def analyze_dog_position(box, frame_height):
     triggered_zones = check_polygon_zones([x1, y1, x2, y2])
 
     # Check multiple indicators
-    is_high_enough = dog_top < COUNTER_HEIGHT_THRESHOLD
-    is_large_enough = relative_size > MIN_ELEVATED_SIZE_RATIO
+    is_high_enough = dog_top < CONFIG['counter_height_threshold']
+    is_large_enough = relative_size > CONFIG['min_elevated_size_ratio']
     in_any_zone = len(triggered_zones) > 0
 
     return {
@@ -96,7 +123,7 @@ def draw_polygon_zones(frame):
     """Draw all enabled polygon zones on the frame"""
     overlay = frame.copy()
 
-    for _, zone in ZONES.items():
+    for _, zone in CONFIG['zones'].items():
         if not zone['enabled']:
             continue
 
@@ -145,7 +172,7 @@ def draw_polygon_zones(frame):
 def trigger_alert(zones):
     """Trigger appropriate alerts for the zones"""
     for zone_id in zones:
-        zone = ZONES[zone_id]
+        zone = CONFIG['zones'][zone_id]
         print(f'🚨 ALERT: Dog detected on {zone["name"]}!')
 
         # Here you would trigger your ultrasonic sound or other actions
@@ -181,7 +208,7 @@ def process_frames():
         frame = draw_polygon_zones(frame)
 
         # Run detection
-        results = model(frame, verbose=False, conf=CONFIDENCE_THRESHOLD)
+        results = model(frame, verbose=False, conf=CONFIG['confidence_threshold'])
 
         elevated_detected = False
         all_triggered_zones = set()
@@ -237,7 +264,7 @@ def process_frames():
                     # Show which zones are triggered
                     if analysis['zones']:
                         zones_text = 'Zones: ' + ', '.join(
-                            [ZONES[z]['name'] for z in analysis['zones']]
+                            [CONFIG['zones'][z]['name'] for z in analysis['zones']]
                         )
                         cv2.putText(
                             frame,
@@ -284,7 +311,9 @@ def process_frames():
 
         # Show active zones in alert
         if elevated_detected and all_triggered_zones:
-            zones_names = ', '.join([ZONES[z]['name'] for z in all_triggered_zones])
+            zones_names = ', '.join(
+                [CONFIG['zones'][z]['name'] for z in all_triggered_zones]
+            )
             cv2.putText(
                 frame,
                 f'Location: {zones_names}',
@@ -333,7 +362,7 @@ def index():
 
     return render_template_string(
         HTML_TEMPLATE,
-        zones=ZONES,
+        zones=CONFIG['zones'],
         video_width=video_width,
         video_height=video_height,
     )
@@ -354,7 +383,7 @@ def main():
     model = YOLO('yolo11n.onnx')
 
     print('\n=== CONFIGURED ZONES (POLYGONS) ===')
-    for _, zone in ZONES.items():
+    for _, zone in CONFIG['zones'].items():
         status = 'ENABLED' if zone['enabled'] else 'DISABLED'
         print(f'  {zone["name"]}: {status}')
         print(f'    Points: {zone["polygon"]}')
@@ -376,12 +405,12 @@ def main():
     processing_thread = threading.Thread(target=process_frames, daemon=True)
     processing_thread.start()
 
-    print(f'\n🌐 Web server starting on port {WEB_SERVER_PORT}')
-    print(f'📱 Open http://YOUR_PI_IP:{WEB_SERVER_PORT} in your browser')
-    print(f'   (or http://localhost:{WEB_SERVER_PORT} if running locally)\n')
+    print(f'\n🌐 Web server starting on port {CONFIG["web_server_port"]}')
+    print(f'📱 Open http://YOUR_PI_IP:{CONFIG["web_server_port"]} in your browser')
+    print(f'   (or http://localhost:{CONFIG["web_server_port"]} if running locally)\n')
 
     # Start Flask server
-    app.run(host='::', port=WEB_SERVER_PORT, debug=False, threaded=True)
+    app.run(host='::', port=CONFIG['web_server_port'], debug=False, threaded=True)
 
 
 if __name__ == '__main__':
