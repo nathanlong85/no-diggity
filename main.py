@@ -193,7 +193,7 @@ def trigger_alert(zones):
 
 def process_frames():
     """Continuously process frames from webcam"""
-    global latest_frame, cap, net
+    global latest_frame, cap, net, frame_count
 
     while True:
         ret, frame = cap.read()
@@ -201,10 +201,17 @@ def process_frames():
             print('Error: Could not read frame')
             break
 
+        frame_count += 1
         frame_height, frame_width = frame.shape[:2]
 
         # Draw zones on frame
         frame = draw_polygon_zones(frame)
+
+        # Only run detection every 3rd frame for performance
+        if frame_count % 3 != 0:
+            with frame_lock:
+                latest_frame = frame.copy()
+            continue
 
         # Prepare frame for MobileNet-SSD
         blob = cv2.dnn.blobFromImage(
