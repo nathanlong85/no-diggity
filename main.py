@@ -123,8 +123,21 @@ def analyze_dog_position(box, frame_height):
     }
 
 
-def draw_polygon_zones(frame):
-    """Draw all enabled polygon zones on the frame"""
+def draw_polygon_zones(frame, draw_full=True):
+    """Draw all enabled polygon zones on the frame
+
+    Args:
+        draw_full: If False, only draw simple outlines (faster)
+    """
+    if not draw_full:
+        # Lightweight drawing for skipped frames
+        for _, zone in CONFIG['zones'].items():
+            if not zone['enabled']:
+                continue
+            polygon = np.array(zone['polygon'], np.int32)
+            cv2.polylines(frame, [polygon], True, zone['color'], 2)
+        return frame
+
     overlay = frame.copy()
 
     for _, zone in CONFIG['zones'].items():
@@ -230,16 +243,19 @@ def process_frames():
             detection_count = 0
             detection_start_time = time.time()
 
-        # Draw zones on frame
-        frame = draw_polygon_zones(frame)
+        # Only run detection every Nth frame for performance
+        should_detect = frame_count % CONFIG['frame_skip'] == 0
 
-        # Only run detection every 3rd frame for performance
-        if frame_count % 3 != 0:
+        if should_detect:
+            detection_count += 1
+            # Draw zones fully on detection frames
+            frame = draw_polygon_zones(frame, draw_full=True)
+        else:
+            # Lightweight zone drawing on skipped frames
+            frame = draw_polygon_zones(frame, draw_full=False)
             with frame_lock:
                 latest_frame = frame.copy()
             continue
-
-        detection_count += 1
 
         # Prepare frame for MobileNet-SSD
         blob = cv2.dnn.blobFromImage(
@@ -410,7 +426,9 @@ def generate_frames():
             frame = latest_frame.copy()
 
         # Encode frame as JPEG
-        ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        ret, buffer = cv2.imencode(
+            '.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, CONFIG['jpeg_quality']]
+        )
         if not ret:
             continue
 
