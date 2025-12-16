@@ -60,6 +60,17 @@ class DetectionClient:
         self.detection_history = []  # [(frame_id, elevated), ...]
         self.max_history = 10
 
+        # Performance tracking
+        self.perf_stats = {
+            'last_fps_time': time.time(),
+            'fps_frame_count': 0,
+            'current_fps': 0,
+            'send_times': [],  # Track send times for average
+            'latencies': [],  # Track round-trip latencies
+            'frame_send_times': {},  # {frame_id: send_timestamp}
+        }
+        self.perf_log_interval = 5.0  # Log stats every 5 seconds
+
     def init_camera(self):
         """Initialize camera"""
         print('📷 Initializing camera...')
@@ -100,13 +111,24 @@ class DetectionClient:
             return
 
         self.frame_id += 1
+        send_start = time.time()
 
         # Create frame message
         message = FrameMessage.create(frame, self.frame_id, self.config['jpeg_quality'])
 
         # Send to server
         await self.websocket.send(serialize_message(message))
+
+        send_time = time.time() - send_start
         self.stats['frames_sent'] += 1
+
+        # Track performance
+        self.perf_stats['send_times'].append(send_time)
+        self.perf_stats['frame_send_times'][self.frame_id] = time.time()
+
+        # Keep only last 100 measurements
+        if len(self.perf_stats['send_times']) > 100:
+            self.perf_stats['send_times'].pop(0)
 
         return self.frame_id
 
@@ -134,8 +156,21 @@ class DetectionClient:
         frame_id = detection['frame_id']
         elevated = detection['elevated']
         boxes = detection['boxes']
+        processing_time = detection.get('processing_time', 0)
 
         self.stats['detections_received'] += 1
+
+        # Calculate latency (round-trip time)
+        if frame_id in self.perf_stats['frame_send_times']:
+            latency = time.time() - self.perf_stats['frame_send_times'][frame_id]
+            self.perf_stats['latencies'].append(latency)
+
+            # Keep only last 100 measurements
+            if len(self.perf_stats['latencies']) > 100:
+                self.perf_stats['latencies'].pop(0)
+
+            # Clean up old send times
+            del self.perf_stats['frame_send_times'][frame_id]
 
         # Add to history
         self.detection_history.append((frame_id, elevated))
@@ -145,11 +180,17 @@ class DetectionClient:
         # Check for consecutive elevated detections
         consecutive = self.check_consecutive_elevated()
 
-        # Log result
+        # Log result with performance info
         status = '🚨 ELEVATED' if elevated else '✓ Floor'
+        latency = (
+            self.perf_stats['latencies'][-1] if self.perf_stats['latencies'] else 0
+        )
+
         print(
-            f'📡 Detection {frame_id}: {status} '
-            f'| Boxes: {len(boxes)} '
+            f'📡 Frame {frame_id}: {status} '
+            f'| Dogs: {len(boxes)} '
+            f'| Server: {processing_time * 1000:.0f}ms '
+            f'| Latency: {latency * 1000:.0f}ms '
             f'| Consecutive: {consecutive}'
         )
 
@@ -188,10 +229,46 @@ class DetectionClient:
         print('=' * 50 + '\n')
         # TODO: Add ultrasonic speaker trigger here
 
+    def log_performance_stats(self):
+        """Log performance statistics"""
+        if not self.perf_stats['send_times']:
+            return
+
+        # Calculate averages
+        avg_send = sum(self.perf_stats['send_times']) / len(
+            self.perf_stats['send_times']
+        )
+
+        if self.perf_stats['latencies']:
+            avg_latency = sum(self.perf_stats['latencies']) / len(
+                self.perf_stats['latencies']
+            )
+            min_latency = min(self.perf_stats['latencies'])
+            max_latency = max(self.perf_stats['latencies'])
+        else:
+            avg_latency = min_latency = max_latency = 0
+
+        # Calculate current FPS
+        current_fps = self.perf_stats['current_fps']
+
+        print('\n' + '─' * 60)
+        print('⚡ PERFORMANCE STATS:')
+        print(f'   Camera FPS: {current_fps:.1f}')
+        print(f'   Avg Send Time: {avg_send * 1000:.1f}ms')
+        print(
+            f'   Avg Latency: {avg_latency * 1000:.0f}ms (min: {min_latency * 1000:.0f}ms, max: {max_latency * 1000:.0f}ms)'
+        )
+        print(
+            f'   Frames Sent: {self.stats["frames_sent"]} | Received: {self.stats["detections_received"]}'
+        )
+        print(f'   Elevated Detections: {self.stats["elevated_count"]}')
+        print('─' * 60 + '\n')
+
     async def capture_loop(self):
         """Main loop for capturing and sending frames"""
         print('\n📸 Starting frame capture...')
         frame_count = 0
+        last_perf_log = time.time()
 
         while self.running:
             ret, frame = self.camera.read()
@@ -202,6 +279,21 @@ class DetectionClient:
 
             frame_count += 1
             self.stats['frames_captured'] += 1
+            self.perf_stats['fps_frame_count'] += 1
+
+            # Calculate FPS every second
+            elapsed = time.time() - self.perf_stats['last_fps_time']
+            if elapsed >= 1.0:
+                self.perf_stats['current_fps'] = (
+                    self.perf_stats['fps_frame_count'] / elapsed
+                )
+                self.perf_stats['fps_frame_count'] = 0
+                self.perf_stats['last_fps_time'] = time.time()
+
+            # Log performance stats periodically
+            if time.time() - last_perf_log >= self.perf_log_interval:
+                self.log_performance_stats()
+                last_perf_log = time.time()
 
             # Only send every Nth frame
             if frame_count % self.config['frame_skip'] == 0:
@@ -238,12 +330,18 @@ class DetectionClient:
             if self.websocket:
                 await self.websocket.close()
 
-            # Print stats
-            print(f'\n📊 Session Statistics:')
+            # Print final stats
+            print(f'\n📊 Final Session Statistics:')
             print(f'   Frames captured: {self.stats["frames_captured"]}')
             print(f'   Frames sent: {self.stats["frames_sent"]}')
             print(f'   Detections received: {self.stats["detections_received"]}')
             print(f'   Elevated detections: {self.stats["elevated_count"]}')
+
+            if self.perf_stats['latencies']:
+                avg_latency = sum(self.perf_stats['latencies']) / len(
+                    self.perf_stats['latencies']
+                )
+                print(f'   Average latency: {avg_latency * 1000:.0f}ms')
 
 
 def main():

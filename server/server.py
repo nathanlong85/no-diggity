@@ -8,9 +8,12 @@ and returns detection results.
 import asyncio
 import sys
 import time
+import warnings
 from pathlib import Path
 
 import websockets
+
+warnings.filterwarnings('ignore', message='Could not initialize NNPACK')
 
 # Add shared module to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -26,8 +29,9 @@ from shared.protocol import (
 
 # Import server config and model loader
 try:
-    from config import SERVER_CONFIG
     from model_loader import load_model
+
+    from config import SERVER_CONFIG
 except ImportError:
     print('❌ Error: Make sure config.py and model_loader.py exist in server/')
     sys.exit(1)
