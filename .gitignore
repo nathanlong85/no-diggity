@@ -208,3 +208,4 @@ __marimo__/
 
 # Downloaded AI Models
 *.caffemodel
+*.pt

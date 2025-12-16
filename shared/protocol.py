@@ -1,14 +1,14 @@
 """
 Shared message protocol for No Diggity client-server communication.
 
-This module defines the message formats exchanged between the Pi client
-and the PC server over WebSocket.
+This module defines the message formats exchanged between the client
+and the server over WebSocket.
 """
 
 import base64
 import json
 import time
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -30,7 +30,7 @@ class FrameMessage:
     @staticmethod
     def create(
         frame: np.ndarray, frame_id: int, jpeg_quality: int = 70
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """
         Create a frame message from a numpy image array.
 
@@ -62,7 +62,7 @@ class FrameMessage:
         }
 
     @staticmethod
-    def decode(message: dict[str, Any]) -> tuple[np.ndarray, int, float]:
+    def decode(message: Dict[str, Any]) -> Tuple[np.ndarray, int, float]:
         """
         Decode a frame message back to numpy array.
 
@@ -91,9 +91,9 @@ class DetectionMessage:
     def create(
         frame_id: int,
         elevated: bool,
-        boxes: list[dict[str, Any]],
+        boxes: List[Dict[str, Any]],
         processing_time: float,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """
         Create a detection result message.
 
@@ -122,9 +122,7 @@ class ErrorMessage:
     """Error message for communication issues"""
 
     @staticmethod
-    def create(
-        error_type: str, message: str, frame_id: int | None = None
-    ) -> dict[str, Any]:
+    def create(error_type: str, message: str, frame_id: Optional[int] = None):
         """Create an error message"""
         return {
             'type': MessageType.ERROR,
@@ -139,12 +137,12 @@ class PingPongMessage:
     """Ping/Pong messages for connection health checks"""
 
     @staticmethod
-    def create_ping() -> dict[str, Any]:
+    def create_ping() -> Dict[str, Any]:
         """Create a ping message"""
         return {'type': MessageType.PING, 'timestamp': time.time()}
 
     @staticmethod
-    def create_pong(ping_timestamp: float) -> dict[str, Any]:
+    def create_pong(ping_timestamp: float) -> Dict[str, Any]:
         """Create a pong message in response to a ping"""
         return {
             'type': MessageType.PONG,
@@ -153,11 +151,11 @@ class PingPongMessage:
         }
 
 
-def serialize_message(message: dict[str, Any]) -> str:
+def serialize_message(message: Dict[str, Any]) -> str:
     """Serialize a message dictionary to JSON string"""
     return json.dumps(message)
 
 
-def deserialize_message(message_str: str) -> dict[str, Any]:
+def deserialize_message(message_str: str) -> Dict[str, Any]:
     """Deserialize a JSON string to message dictionary"""
     return json.loads(message_str)

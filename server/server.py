@@ -24,16 +24,13 @@ from shared.protocol import (
     serialize_message,
 )
 
-# Import server config
+# Import server config and model loader
 try:
     from config import SERVER_CONFIG
+    from model_loader import load_model
 except ImportError:
-    # Default config if config.py doesn't exist yet
-    SERVER_CONFIG = {
-        'host': '0.0.0.0',
-        'port': 8765,
-        'model_preference': 'auto',
-    }
+    print('❌ Error: Make sure config.py and model_loader.py exist in server/')
+    sys.exit(1)
 
 
 class DetectionServer:
@@ -46,15 +43,20 @@ class DetectionServer:
             'frames_processed': 0,
             'total_processing_time': 0.0,
             'errors': 0,
+            'dogs_detected': 0,
         }
 
     async def initialize_model(self):
-        """Initialize ML model (placeholder for now)"""
+        """Initialize ML model"""
         print('🤖 Initializing ML model...')
-        # TODO: Phase 2 - Load actual model
-        print('⚠️  Using FAKE detections for Phase 1 testing')
-        self.model = 'fake_model'
-        print('✓ Model ready')
+
+        # Load model based on config preference
+        self.model = load_model(
+            preference=self.config['model_preference'],
+            confidence_threshold=self.config['confidence_threshold'],
+        )
+
+        print('✓ Model ready\n')
 
     async def process_frame(self, frame, frame_id: int) -> dict:
         """
@@ -69,31 +71,19 @@ class DetectionServer:
         """
         start_time = time.time()
 
-        # TODO: Phase 2 - Replace with actual model inference
-        # For now, return fake detections
-        await asyncio.sleep(0.05)  # Simulate processing time
+        # Run detection
+        detections = self.model.detect(frame)
 
-        # Fake detection: alternating elevated/not elevated
-        elevated = (frame_id % 3) == 0
-        boxes = []
-
-        if elevated:
-            # Fake bounding box
-            boxes.append(
-                {
-                    'x1': 100,
-                    'y1': 150,
-                    'x2': 300,
-                    'y2': 350,
-                    'confidence': 0.85,
-                    'class_id': 12,  # Dog class
-                    'class_name': 'dog',
-                }
-            )
+        # Check if any dogs detected
+        elevated = len(detections) > 0  # For now, any detection is "elevated"
+        # TODO: Phase 3 - Add polygon zone checking for proper elevated detection
 
         processing_time = time.time() - start_time
 
-        return DetectionMessage.create(frame_id, elevated, boxes, processing_time)
+        if detections:
+            self.stats['dogs_detected'] += 1
+
+        return DetectionMessage.create(frame_id, elevated, detections, processing_time)
 
     async def handle_frame_message(self, message: dict) -> dict:
         """Handle incoming frame message"""
@@ -119,23 +109,30 @@ class DetectionServer:
             avg_time = (
                 self.stats['total_processing_time'] / self.stats['frames_processed']
             )
-            status = '🚨 ELEVATED' if detection['elevated'] else '✓ Floor'
+            avg_fps = 1.0 / avg_time if avg_time > 0 else 0
+
+            num_dogs = len(detection['boxes'])
+            status = f'🐕 {num_dogs} dog(s)' if num_dogs > 0 else '✓ No dogs'
+
             print(
                 f'   → {status} | '
                 f'Processing: {detection["processing_time"] * 1000:.1f}ms '
-                f'(avg: {avg_time * 1000:.1f}ms)'
+                f'(avg: {avg_time * 1000:.1f}ms, {avg_fps:.1f} FPS)'
             )
 
             return detection
 
         except Exception as e:
             print(f'❌ Error processing frame: {e}')
+            import traceback
+
+            traceback.print_exc()
             self.stats['errors'] += 1
             return ErrorMessage.create(
                 'processing_error', str(e), message.get('frame_id')
             )
 
-    async def handle_client(self, websocket, path):
+    async def handle_client(self, websocket):
         """Handle a single client connection"""
         client_addr = websocket.remote_address
         print(f'\n🔌 Client connected: {client_addr}')
@@ -164,14 +161,21 @@ class DetectionServer:
             print(f'🔌 Client disconnected: {client_addr}')
         except Exception as e:
             print(f'❌ Error handling client: {e}')
+            import traceback
+
+            traceback.print_exc()
         finally:
             print(f'\n📊 Session stats:')
             print(f'   Frames processed: {self.stats["frames_processed"]}')
+            print(f'   Dogs detected: {self.stats["dogs_detected"]}')
             if self.stats['frames_processed'] > 0:
-                avg_fps = 1.0 / (
+                avg_time = (
                     self.stats['total_processing_time'] / self.stats['frames_processed']
                 )
-                print(f'   Average processing FPS: {avg_fps:.1f}')
+                avg_fps = 1.0 / avg_time if avg_time > 0 else 0
+                print(
+                    f'   Average processing: {avg_time * 1000:.1f}ms ({avg_fps:.1f} FPS)'
+                )
             print(f'   Errors: {self.stats["errors"]}')
 
     async def start(self):
@@ -181,10 +185,11 @@ class DetectionServer:
         host = self.config['host']
         port = self.config['port']
 
-        print(f'\n🚀 Starting detection server...')
+        print(f'🚀 Starting detection server...')
         print(f'   Host: {host}')
         print(f'   Port: {port}')
-        print(f'   Model: {self.config["model_preference"]}')
+        print(f'   Model: {self.model.model_type}')
+        print(f'   Confidence threshold: {self.config["confidence_threshold"]}')
 
         async with websockets.serve(self.handle_client, host, port):
             print(f'\n✓ Server running on ws://{host}:{port}')
