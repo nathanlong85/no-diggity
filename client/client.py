@@ -193,6 +193,8 @@ class DetectionClient:
         # Send zones to dashboard
         if self.dashboard_enabled:
             set_zones(self.config['zones'])
+            # Send initial stats
+            self.update_dashboard_stats()
 
         return frame.shape[:2]
 
@@ -453,6 +455,7 @@ class DetectionClient:
         print('\n📸 Starting frame capture...')
         frame_count = 0
         last_perf_log = time.time()
+        last_dashboard_update = time.time()
 
         while self.running:
             ret, frame = self.camera.read()
@@ -481,6 +484,11 @@ class DetectionClient:
             if time.time() - last_perf_log >= self.perf_log_interval:
                 self.log_performance_stats()
                 last_perf_log = time.time()
+
+            # Update dashboard more frequently (every 2 seconds)
+            if self.dashboard_enabled and time.time() - last_dashboard_update >= 2.0:
+                self.update_dashboard_stats()
+                last_dashboard_update = time.time()
 
             # Only send every Nth frame
             if frame_count % self.config['frame_skip'] == 0:

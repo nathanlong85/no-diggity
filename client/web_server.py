@@ -58,6 +58,9 @@ def update_stats(stats: dict):
     # Broadcast to connected clients
     socketio.emit('stats_update', dashboard_state['stats'])
 
+    # Debug: Print stats update (can be removed in production)
+    # print(f'📊 Dashboard stats updated: FPS={stats.get("current_fps", 0):.1f}, Alerts={stats.get("alerts_triggered", 0)}')
+
 
 def add_alert(alert_data: dict):
     """Add new alert to recent alerts"""
@@ -280,7 +283,17 @@ def get_alert_log():
 def get_state():
     """Get complete dashboard state"""
     with state_lock:
-        return jsonify(dashboard_state)
+        # Exclude current_frame as it's not JSON serializable
+        state_to_send = {
+            'stats': dashboard_state['stats'],
+            'recent_alerts': dashboard_state['recent_alerts'],
+            'current_detections': dashboard_state['current_detections'],
+            'zones': dashboard_state['zones'],
+            'connected_clients': dashboard_state['connected_clients'],
+            'server_status': dashboard_state['server_status'],
+            'last_update': dashboard_state['last_update'],
+        }
+        return jsonify(state_to_send)
 
 
 def generate_video_stream():
@@ -313,13 +326,21 @@ def video_feed():
 
 # SocketIO events
 @socketio.on('connect')
-def handle_connect():
+def handle_connect(auth=None):
     """Handle client connection"""
     with state_lock:
         dashboard_state['connected_clients'] += 1
 
-    # Send initial state
-    socketio.emit('initial_state', dashboard_state)
+    # Send initial state (excluding current_frame which isn't JSON serializable)
+    state_to_send = {
+        'stats': dashboard_state['stats'],
+        'recent_alerts': dashboard_state['recent_alerts'],
+        'current_detections': dashboard_state['current_detections'],
+        'zones': dashboard_state['zones'],
+        'server_status': dashboard_state['server_status'],
+    }
+
+    socketio.emit('initial_state', state_to_send)
     print(
         f'📱 Dashboard client connected (total: {dashboard_state["connected_clients"]})'
     )
