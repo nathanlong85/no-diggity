@@ -4,6 +4,12 @@ The No Diggity web dashboard provides real-time monitoring and visualization of 
 
 ## Features
 
+📹 **Live Video Feed**
+- Real-time MJPEG stream from camera
+- Annotated with detection boxes and zones
+- FPS counter and timestamp overlay
+- Green status indicator when streaming
+
 ✨ **Real-time Statistics**
 - Camera FPS and frame processing
 - Detection counts and alerts

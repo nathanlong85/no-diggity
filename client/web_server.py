@@ -11,7 +11,9 @@ from datetime import datetime
 from pathlib import Path
 from threading import Lock
 
-from flask import Flask, jsonify, render_template, send_from_directory
+import cv2
+import numpy as np
+from flask import Flask, Response, jsonify, render_template, send_from_directory
 from flask_socketio import SocketIO
 
 app = Flask(__name__)
@@ -32,6 +34,8 @@ dashboard_state = {
     },
     'recent_alerts': [],  # Last 50 alerts
     'current_detections': [],  # Current frame detections
+    'current_frame': None,  # Current annotated frame for live feed
+    'zones': {},  # Zone definitions
     'connected_clients': 0,
     'server_status': 'disconnected',
     'last_update': time.time(),
@@ -86,6 +90,113 @@ def update_detections(detections: list):
         dashboard_state['current_detections'] = detections
 
     socketio.emit('detections_update', detections)
+
+
+def update_video_frame(frame: np.ndarray, detections: list = None, zones: dict = None):
+    """Update the current video frame with annotations"""
+    if frame is None:
+        return
+
+    # Create annotated frame
+    annotated = frame.copy()
+
+    # Draw zones if provided
+    if zones:
+        overlay = annotated.copy()
+        for zone_id, zone in zones.items():
+            if not zone.get('enabled', True):
+                continue
+
+            polygon = np.array(zone['polygon'], np.int32)
+            color = (0, 255, 0)  # Green for zones
+
+            # Fill polygon with transparency
+            cv2.fillPoly(overlay, [polygon], color)
+
+            # Draw outline
+            cv2.polylines(annotated, [polygon], True, color, 2)
+
+            # Draw zone name
+            center = polygon.mean(axis=0).astype(int)
+            cv2.putText(
+                annotated,
+                zone.get('name', zone_id),
+                tuple(center),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2,
+            )
+
+        # Blend overlay for transparency
+        cv2.addWeighted(overlay, 0.3, annotated, 0.7, 0, annotated)
+
+    # Draw detection boxes if provided
+    if detections:
+        for det in detections:
+            x1, y1, x2, y2 = (
+                int(det['x1']),
+                int(det['y1']),
+                int(det['x2']),
+                int(det['y2']),
+            )
+            conf = det.get('confidence', 0)
+
+            # Draw box (yellow for detections)
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 255), 2)
+
+            # Draw label with background
+            label = f'{det.get("class_name", "dog")} {conf:.2f}'
+            label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+            cv2.rectangle(
+                annotated,
+                (x1, y1 - label_size[1] - 10),
+                (x1 + label_size[0], y1),
+                (0, 255, 255),
+                -1,
+            )
+            cv2.putText(
+                annotated,
+                label,
+                (x1, y1 - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 0, 0),
+                2,
+            )
+
+    # Add timestamp
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cv2.putText(
+        annotated,
+        timestamp,
+        (10, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2,
+    )
+
+    # Add FPS counter
+    fps = dashboard_state['stats'].get('current_fps', 0)
+    cv2.putText(
+        annotated,
+        f'FPS: {fps:.1f}',
+        (10, 60),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2,
+    )
+
+    with state_lock:
+        dashboard_state['current_frame'] = annotated
+
+
+def set_zones(zones: dict):
+    """Update zone definitions"""
+    with state_lock:
+        dashboard_state['zones'] = zones
 
 
 def set_server_status(status: str):
@@ -170,6 +281,34 @@ def get_state():
     """Get complete dashboard state"""
     with state_lock:
         return jsonify(dashboard_state)
+
+
+def generate_video_stream():
+    """Generate MJPEG stream from current frames"""
+    while True:
+        with state_lock:
+            frame = dashboard_state.get('current_frame')
+
+        if frame is not None:
+            # Encode frame as JPEG
+            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if ret:
+                frame_bytes = buffer.tobytes()
+                yield (
+                    b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n'
+                )
+
+        # Small delay to prevent overwhelming the client
+        time.sleep(0.033)  # ~30 FPS max
+
+
+@app.route('/video_feed')
+def video_feed():
+    """Video streaming route"""
+    return Response(
+        generate_video_stream(), mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
 
 
 # SocketIO events

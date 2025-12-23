@@ -32,7 +32,13 @@ try:
 
     # Try to import web dashboard
     try:
-        from web_server import update_stats, add_alert, set_server_status
+        from web_server import (
+            add_alert,
+            set_server_status,
+            set_zones,
+            update_stats,
+            update_video_frame,
+        )
 
         DASHBOARD_AVAILABLE = True
     except ImportError:
@@ -47,6 +53,12 @@ try:
             pass
 
         def set_server_status(status):
+            pass
+
+        def set_zones(zones):
+            pass
+
+        def update_video_frame(frame, detections=None, zones=None):
             pass
 
 except ImportError:
@@ -80,6 +92,24 @@ except ImportError:
 
         def cleanup(self):
             pass
+
+    # Mock dashboard functions
+    def update_stats(stats):
+        pass
+
+    def add_alert(alert_data):
+        pass
+
+    def set_server_status(status):
+        pass
+
+    def set_zones(zones):
+        pass
+
+    def update_video_frame(frame, detections=None, zones=None):
+        pass
+
+    DASHBOARD_AVAILABLE = False
 
 
 class DetectionClient:
@@ -159,6 +189,10 @@ class DetectionClient:
             print(f'✓ Active zones: {", ".join(enabled_zones)}')
         else:
             print('⚠️  No zones enabled - all detections will be considered floor')
+
+        # Send zones to dashboard
+        if self.dashboard_enabled:
+            set_zones(self.config['zones'])
 
         return frame.shape[:2]
 
@@ -290,6 +324,10 @@ class DetectionClient:
         # Trigger alert if consecutive
         if consecutive:
             self.trigger_alert(triggered_zones, boxes)
+
+        # Update dashboard video feed
+        if self.dashboard_enabled and self.current_frame is not None:
+            update_video_frame(self.current_frame, boxes, self.config['zones'])
 
     def check_consecutive_elevated(self) -> bool:
         """
